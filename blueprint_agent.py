@@ -388,6 +388,7 @@ def validate_task_plan_preservation(
             )
 
 
+
 def parse_canonical_tasks(task_plan: str) -> list[dict]:
     """Parse individual task blocks from Task Planner Markdown output."""
 
@@ -409,21 +410,26 @@ def parse_canonical_tasks(task_plan: str) -> list[dict]:
         )
 
     def read_field(block: str, label: str) -> str:
+        """Read a single-line field with optional Markdown bold markers."""
         pattern = (
-            rf"(?im)^\s*[-*+]\s*{re.escape(label)}\s*:\s*(.*)$"
+            rf"(?im)^\s*[-*+]\s+\**\s*"
+            rf"{re.escape(label)}\s*\**\s*:\s*(.*?)\s*$"
         )
         match = re.search(pattern, block)
         return match.group(1).strip() if match else ""
 
     def read_section(block: str, label: str) -> str:
+        """Read a multiline section with optional Markdown bold markers."""
         pattern = (
-            rf"(?ims)^\s*[-*+]\s*{re.escape(label)}\s*:\s*(.*?)"
-            rf"(?=^\s*[-*+]\s*[A-Za-z][^:\n]*\s*:|\Z)"
+            rf"(?ims)^\s*[-*+]\s+\**\s*"
+            rf"{re.escape(label)}\s*\**\s*:\s*(.*?)"
+            rf"(?=^\s*[-*+]\s+\**\s*[A-Za-z][^:\n]*\**\s*:|\Z)"
         )
         match = re.search(pattern, block)
         return match.group(1) if match else ""
 
     def read_bullets(section: str) -> list[str]:
+        """Extract bullet items from a section."""
         items = re.findall(
             r"(?m)^\s*[-*+]\s+(.+?)\s*$",
             section,
@@ -474,10 +480,13 @@ def parse_canonical_tasks(task_plan: str) -> list[dict]:
             raise ValueError(
                 f"{task_id} has no Objective. Check its Task Planner block."
             )
+
         if not files:
             raise ValueError(
-                f"{task_id} has no files under 'Files to create or modify'."
+                f"{task_id} has no files under "
+                "'Files to create or modify'."
             )
+
         if not criteria:
             raise ValueError(
                 f"{task_id} has no Acceptance criteria."
@@ -523,6 +532,19 @@ def normalize_blueprint_task_dependencies(
     """
     Preserve canonical Task Planner tasks and merge Blueprint LLM file mappings.
     """
+    print("\n========== TASK PLAN DEBUG ==========")
+    print("Task plan type:", type(task_plan).__name__)
+    print("Task plan length:", len(task_plan) if isinstance(task_plan, str) else "N/A")
+    print("Task plan preview:")
+    print(repr(task_plan[:4000]) if isinstance(task_plan, str) else repr(task_plan))
+    print("Detected task headings:")
+    if isinstance(task_plan, str):
+        print(re.findall(
+            r"^###\s+((?:DB|BE|FE|INT|TEST)-\d+):\s*(.+?)\s*$",
+            task_plan,
+            re.IGNORECASE | re.MULTILINE,
+        ))
+    print("=====================================\n")
     canonical_tasks = parse_canonical_tasks(task_plan)
     llm_tasks = blueprint_data.get("tasks", [])
     blueprint_files = blueprint_data.setdefault("files", [])

@@ -2,6 +2,8 @@ from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
 from langchain_groq import ChatGroq
 
+import re
+
 load_dotenv()
 
 
@@ -17,8 +19,7 @@ load_dotenv()
 planner_llm = ChatOllama(
     model="llama3.2",
     temperature=0,
-    num_predict=1200,
-    repeat_penalty=1.1,
+    num_predict=4096,
 )
 
 # planner_llm = ChatGroq(
@@ -26,9 +27,23 @@ planner_llm = ChatOllama(
 #     temperature=0,
 # )
 
+# planner_llm = ChatGroq(
+#     model="openai/gpt-oss-120b",
+#     temperature=0,
+#     max_tokens=8192,
+# )
+
 # --------------------------------------------------
 # Task Planner
 # --------------------------------------------------
+
+# def has_valid_task_headings(task_plan: str) -> bool:
+#     pattern = re.compile(
+#         r"^### (?:DB|BE|FE|INT)-\d{3}: .+\S",
+#         re.MULTILINE,
+#     )
+#     return bool(pattern.search(task_plan))
+
 
 def create_task_plan(
     user_request: str,
@@ -43,303 +58,903 @@ def create_task_plan(
     code.
     """
 
-  
+
     prompt = f"""
-    You are the Task Planning Agent in an AI software development system.
+    You are the Task Planning Agent in an AI-driven software development system.
 
-    Your output is consumed by automated Blueprint, Scaffolder, and coding agents.
-    Produce a precise, machine-actionable implementation plan based ONLY on the
-    user request, requirements, and approved technical design.
+Your responsibility is to transform an approved software request, analyzed requirements, and approved technical design into a precise, dependency-aware, machine-actionable implementation plan.
 
-    ==================== SOURCE INPUTS ====================
+Your output is consumed by downstream components:
 
-    USER REQUEST:
-    {user_request}
+1. Project Blueprint Generator
+2. Project Scaffolder
+3. Task Orchestrator
+4. Specialized implementation workers
+5. Integration and testing workers
 
-    REQUIREMENTS:
-    {requirements}
+The quality of your output directly affects whether these components can execute the project correctly. Prioritize correctness, completeness, consistency, explicit dependencies, and implementation feasibility over verbosity.
 
-    APPROVED TECHNICAL DESIGN:
-    {design}
+You are a planning agent. Do not implement the application or generate source-code implementations.
 
-    ==================== CORE OBJECTIVE ====================
+==================================================
+1. SOURCE INPUTS
+==================================================
 
-    Create a concise, dependency-aware implementation plan for a small
-    application. Prefer 6-10 meaningful tasks when appropriate.
+USER REQUEST:
+{user_request}
 
-    The approved technical design is authoritative for the technology stack,
-    architecture, database, and APIs. Requirements define required behavior.
+ANALYZED REQUIREMENTS:
+{requirements}
 
-    Do not silently replace approved technologies or add unsupported services,
-    frameworks, features, database systems, or deployment platforms.
+APPROVED TECHNICAL DESIGN:
+{design}
 
-    If the design contains contradictions or unresolved decisions, record them
-    under assumptions or unresolved decisions instead of inventing a solution.
+Treat these inputs as project-specific evidence.
 
-    Do not write implementation code, project schedules, dates, sprint durations,
-    staffing estimates, or generic project-management advice.
+The user request establishes the intended product and requested capabilities.
+The analyzed requirements clarify functional behavior, constraints, and expected outcomes.
+The approved technical design establishes the approved architecture and technology decisions.
 
-    ==================== REQUIRED OUTPUT STRUCTURE ====================
+The approved design is authoritative for technology choices. Do not silently replace its frontend, backend, database, framework, architecture, or testing tools.
 
-    Return Markdown with exactly these top-level sections.
+If the inputs conflict, identify the conflict under assumptions and unresolved decisions. Do not silently resolve a material conflict by inventing a new requirement.
 
-    # Implementation Plan
 
-    ## 1. Project Summary
+MANDATORY OUTPUT CONTRACT:
 
-    Include:
-    - Product purpose
-    - Approved frontend technology
-    - Approved backend technology
-    - Approved database technology
-    - Approved testing technology
-    - Architecture style, or "Not specified"
-    - Explicit assumptions and unresolved decisions
+The Blueprint Generator parses individual Markdown task headings.
+If you do not follow this format, the workflow cannot continue.
 
-    Do not change the approved technology stack.
+Every task MUST begin with a heading matching this pattern:
 
-    ## 2. Project Structure
+### DB-001: Specific database task title
+### BE-001: Specific backend task title
+### FE-001: Specific frontend task title
+### INT-001: Specific integration or testing task title
 
-    Propose a repository-relative directory tree consistent with the approved
-    design. Include appropriate frontend, backend, database, tests, and
-    configuration directories only when relevant.
+After each heading, include these fields:
+- Task ID:
+- Worker type:
+- Objective:
+- Files to create or modify:
+- Scope and implementation details:
+- Dependencies (task IDs):
+- Acceptance criteria:
 
-    Use concrete proposed file paths consistently throughout this plan.
+Add relevant database, API, frontend, or testing details where applicable.
 
-    The directory tree is a proposal, not a list of implementation tasks.
-    Do not put task IDs in this section.
+Never represent implementation tasks only as bullets such as:
+* DB-001: Create database schema
 
-    ## 3. Database Tasks
+Never return a blank template, bracketed placeholders, or an example plan.
+Use the supplied user request, requirements, and approved design
+to generate concrete tasks for the actual project.
 
-    Create individual database task blocks using IDs DB-001, DB-002, etc.
+Before returning, verify that at least one valid individual task heading
+exists and that every task has its required fields.
 
-    Every task MUST use this exact format:
+Return the implementation plan only.
+==================================================
+2. PRIMARY OBJECTIVE
+==================================================
 
-    ### DB-001: Short task title
-    - Task ID: DB-001
-    - Objective: One specific, independently verifiable objective.
-    - Files to create or modify:
-    - path/to/file
-    - Entities, fields, relationships, indexes, and constraints:
-    - Specify only what is supported by the inputs.
-    - Dependencies (task IDs): None
-    - Acceptance criteria:
-    - One or more concrete, verifiable checks.
+Produce an implementation plan that can be converted into a structured project blueprint and executed by autonomous workers.
 
-    Repeat the complete block for each database task.
+The plan must answer:
 
-    Each task ID MUST appear in its own block. NEVER group IDs such as
-    "DB-001, DB-002" in one Task ID field.
+- What exactly must be built?
+- Which components are required?
+- Which files are expected to be created or modified?
+- What does each task own?
+- What must exist before each task can start?
+- What measurable result proves that each task is complete?
+- Which tasks can execute independently?
+- How will components be integrated and verified?
+- What information must the Blueprint Generator receive?
 
-    Define database models and schema before tasks that depend on them.
-    Use only the database technology specified by the approved design.
-    Do not introduce SQL tables into a document-database design or collections
-    into a relational-database design unless the approved design requires them.
+Every task must represent real work required by the supplied project.
 
-    ## 4. Backend Tasks
+Never return a generic template, an example project, a sample implementation plan, or instructions for another agent to write the plan.
 
-    Create individual backend task blocks using IDs BE-001, BE-002, etc.
+Never output unresolved template placeholders such as "[Insert product purpose]" or "[Insert approved frontend technology]".
 
-    Every task MUST use this exact format:
+Do not copy example tasks about users, orders, products, or other business domains unless those concepts genuinely belong to the supplied application.
 
-    ### BE-001: Short task title
-    - Task ID: BE-001
-    - Objective: One specific, independently verifiable objective.
-    - Files to create or modify:
-    - path/to/file
-    - API contract:
-    - HTTP method and route
-    - Purpose
-    - Request fields
-    - Response shape and status codes when supported by the design
-    - Authentication, authorization, validation, and error handling:
-    - Specify relevant requirements.
-    - Dependencies (task IDs): DB-001
-    - Acceptance criteria:
-    - One or more concrete, verifiable checks.
-
-    Repeat the complete block for each backend task.
-
-    Every backend task must have its own unique ID and objective.
-    Do not group multiple IDs into one task.
-
-    Keep endpoint names, entity names, fields, and response contracts consistent
-    with the database and approved design.
-
-    Do not create unnecessary APIs or invent unspecified business rules.
-
-    ## 5. Frontend Tasks
-
-    Create individual frontend task blocks using IDs FE-001, FE-002, etc.
-
-    Every task MUST use this exact format:
-
-    ### FE-001: Short task title
-    - Task ID: FE-001
-    - Objective: One specific, independently verifiable objective.
-    - Files to create or modify:
-    - path/to/file
-    - Pages, components, forms, navigation, and state:
-    - Specify the relevant UI behavior.
-    - Backend endpoints consumed:
-    - List only endpoints defined in the backend tasks.
-    - Dependencies (task IDs): BE-001
-    - Acceptance criteria:
-    - One or more concrete, verifiable checks.
-
-    Repeat the complete block for each frontend task.
-
-    Do not group multiple IDs into one task. Follow the approved frontend stack.
-    Do not add frameworks or libraries that are not supported by the design.
-
-    Frontend tasks must depend on backend tasks only when they genuinely require
-    the backend contract or implementation to be available.
-
-    ## 6. Integration and Testing Tasks
-
-    Create individual integration/testing task blocks using IDs INT-001,
-    INT-002, etc. Use TEST-001, TEST-002, etc. only if a distinct testing task
-    category is necessary. Prefer INT IDs for integration and testing tasks
-    in this plan.
-
-    Every task MUST use this exact format:
-
-    ### INT-001: Short task title
-    - Task ID: INT-001
-    - Objective: One specific testing or integration objective.
-    - Files to create or modify:
-    - path/to/test/file
-    - Test scope:
-    - Unit, API, integration, authorization, data isolation, security,
-        or configuration checks relevant to the approved design.
-    - Dependencies (task IDs): BE-001
-    - Acceptance criteria:
-    - One or more concrete, verifiable checks.
-
-    Repeat the complete block for every integration/testing task.
-
-    CRITICAL:
-    - Section 6 MUST contain explicit task blocks, not just a list of test files.
-    - Every INT task must have exactly one ID and a specific objective.
-    - Every INT task must list its files, dependencies, and acceptance criteria.
-    - Do not invent TEST IDs if INT IDs are used.
-    - Do not create testing tasks for unsupported features or services.
-
-    ==================== TASK ID AND DEPENDENCY CONTRACT ====================
-
-    These rules are mandatory because downstream agents parse this output.
-
-    1. Every task is a separate, complete task block with exactly one Task ID.
-    2. Use only these ID prefixes:
-    DB-001, DB-002, ...
-    BE-001, BE-002, ...
-    FE-001, FE-002, ...
-    INT-001, INT-002, ...
-    3. Number tasks sequentially within each category, starting at 001.
-    4. Never group multiple task IDs on one line or in one task block.
-    5. Never omit a task's objective, file list, dependencies, or acceptance
-    criteria.
-    6. Every task ID must be unique across the entire plan.
-    7. Every dependency must reference a task ID declared in one of the task
-    blocks in this plan.
-    8. Use "None" when a task has no dependencies.
-    9. Do not reference task IDs that have not been defined.
-    10. Do not create circular dependencies. If task A depends on task B,
-        task B must not depend on task A, directly or indirectly.
-    11. Database tasks must not depend on backend tasks when the backend depends
-        on those database models or schemas.
-    12. Frontend tasks must not depend on backend tasks that themselves depend
-        on those frontend tasks.
-    13. Integration tests may depend on the components they test, but the
-        components must not depend on those integration tests.
-    14. Do not infer dependencies merely from task order. Declare only genuine
-        prerequisites.
-    15. Use the exact same file path spelling and casing wherever a path appears.
-    16. Every task must reference at least one proposed repository-relative file.
-    17. Keep each task small enough to implement and test independently.
-    18. Do not silently omit required functionality because the plan is concise.
-
-    Before returning the plan, internally verify:
-    - Every task ID has exactly one complete task block.
-    - No IDs are grouped in a single Task ID field.
-    - All dependencies reference existing tasks.
-    - No dependency cycles exist.
-    - All task file paths are repository-relative and consistent.
-    - All required task fields are present.
-    - All task IDs mentioned in Execution Order are defined.
-    - All task IDs mentioned in Handoff are defined.
-    - The integration/testing section contains explicit task blocks.
-    - No unsupported technology or feature was introduced.
-
-    ==================== SECTION 7: EXECUTION ORDER ====================
-
-    ## 7. Execution Order
-
-    List every declared task ID exactly once, in dependency-respecting order.
-
-    Use this format:
-
-    1. DB-001
-    2. DB-002
-    3. BE-001
-    4. FE-001
-    5. INT-001
-
-    Use the actual IDs generated in the task blocks; the example above is
-    illustrative only.
-
-    Tasks may run in parallel only when their dependencies permit it.
-    Do not create new task IDs in this section.
-    Do not omit any declared task.
-
-    ==================== SECTION 8: HANDOFF ====================
-
-    ## 8. Handoff to the Project Blueprint Generator
-
-    Summarize:
-    - Approved technology decisions
-    - Required components
-    - Required entities and relationships
-    - API contracts
-    - Required environment variable NAMES only; never include secrets
-    - Repository structure
-    - Task IDs and their declared dependencies
-    - Assumptions requiring resolution
-
-    Use task IDs exactly as declared in the task blocks.
-    Do not create, rename, group, or omit task IDs in the handoff.
-
-    ==================== FINAL RULES ====================
-
-    1. Treat the approved technical design as authoritative.
-    2. Treat user requirements as authoritative for required functionality.
-    3. Do not replace approved technologies with personal preferences.
-    4. Do not invent business rules, fields, APIs, credentials, or services.
-    5. Mark uncertain file paths as proposed.
-    6. Keep entity names, fields, API routes, and response contracts consistent.
-    7. Use environment variable names only; never output secret values.
-    8. Return only the structured Implementation Plan.
-    9. Do not include source-code implementations.
-    10. Do not group task IDs under a shared task block.
-    11. The Task ID field must contain exactly one ID.
-    12. Every implementation task must have its own explicit task block.
+If an input does not specify a detail, use "Not specified" or record a clearly labeled, minimal assumption. Do not pretend an assumption was explicitly approved.
+
+==================================================
+3. ANALYZE THE PROJECT BEFORE DECOMPOSING IT
+==================================================
+
+Before constructing tasks, derive an internal project specification containing:
+
+A. Product purpose
+- Intended users and primary problem, when specified.
+- Core workflows and expected outcomes.
+- Explicitly requested features.
+- Explicitly excluded features or constraints.
+
+B. Functional requirements
+- User actions and system responses.
+- Main success paths.
+- Relevant validation and error cases.
+- Authentication and authorization requirements, if applicable.
+- Data lifecycle operations, if applicable.
+- Search, filtering, reporting, or external integration requirements, if applicable.
+
+C. Technical architecture
+- Approved frontend technology.
+- Approved backend technology.
+- Approved database technology.
+- Approved testing tools.
+- Relevant architectural boundaries and interfaces.
+- Required configuration and environment variables.
+- External services explicitly required by the inputs.
+
+D. Data and interfaces
+- Entities, fields, relationships, and constraints supported by the inputs.
+- API endpoints, methods, request contracts, and response contracts supported by the design.
+- Frontend pages and components.
+- Internal interfaces between components.
+- Security and data-isolation boundaries.
+
+E. Verification requirements
+- Unit tests.
+- API or component tests.
+- Integration tests.
+- Authorization and validation tests.
+- Build, configuration, or startup verification.
+
+Include only categories that make sense for this project.
+
+Do not invent features to make the project appear more complete. For example, do not add payments, email delivery, cloud deployment, administrative roles, or external integrations unless they are requested, approved, or clearly necessary and explicitly labeled as assumptions.
+
+==================================================
+4. TASK DECOMPOSITION PRINCIPLES
+==================================================
+
+Decompose the project into meaningful, independently actionable tasks.
+
+Prefer 6–10 tasks for a small application when that provides adequate coverage. This is a guideline, not a hard limit. A project with substantial requirements may need more tasks; a very small project may need fewer.
+
+A task should:
+- Have one primary objective.
+- Produce an identifiable implementation result.
+- Have a bounded scope.
+- Specify concrete repository-relative file paths.
+- Define genuine prerequisite tasks.
+- Include objective acceptance criteria.
+- Be understandable to a worker without requiring the worker to redesign the entire application.
+
+Split a task when it combines unrelated responsibilities, spans too many architectural layers, or cannot be independently verified.
+
+Combine tasks when splitting them would create artificial dependencies or negligible work items.
+
+Avoid both extremes:
+- One oversized task that implements the entire application.
+- Numerous trivial tasks that only rename files, create empty folders, or repeat the same responsibility.
+
+Distinguish setup, implementation, and verification work. Do not treat the creation of a directory tree as proof that a feature has been implemented.
+
+Every required feature must be covered by at least one task or be explicitly identified as unresolved. Do not silently omit functionality to meet a preferred task count.
+
+==================================================
+5. WORKER OWNERSHIP AND RESPONSIBILITIES
+==================================================
+
+Use the following task categories and ID prefixes:
+
+DB-001, DB-002, ... for database and data-model work.
+
+BE-001, BE-002, ... for backend business logic, API implementation, authentication, validation, and backend configuration.
+
+FE-001, FE-002, ... for frontend pages, components, forms, client-side state, and user interactions.
+
+INT-001, INT-002, ... for cross-component integration, end-to-end verification, and relevant system-level tests.
+
+Use a category only when its responsibilities exist in the project.
+
+Each task must be suitable for one primary worker type. Do not assign the same task to multiple unrelated workers.
+
+If the current system supports worker types such as database, backend, frontend, testing, configuration, and shared, select the most appropriate supported type. Do not introduce a new worker type unless the downstream system explicitly supports it.
+
+Configuration or shared work may use an appropriate supported worker type when no dedicated category exists.
+
+Database tasks must not implement backend APIs.
+Backend tasks must not implement frontend pages.
+Frontend tasks must not independently redefine backend contracts.
+Integration tasks must verify the agreed interfaces rather than silently redesigning them.
+
+When multiple workers need the same file, identify the shared ownership explicitly and organize dependencies to avoid conflicting edits.
+
+==================================================
+6. PROJECT STRUCTURE
+==================================================
+
+Propose a repository-relative directory structure consistent with the approved technical design.
+
+Include only directories and files that have a clear purpose.
+
+Consider, when applicable:
+- Frontend application source.
+- Backend application source.
+- Database models, migrations, or schema definitions.
+- API routes and request/response schemas.
+- Reusable frontend components.
+- Automated tests.
+- Configuration files.
+- Environment-variable examples without secrets.
+- Documentation required to run and test the project.
+
+Do not assume that every project requires all these categories.
+
+Use one consistent spelling and casing for every file path throughout the plan.
+
+Every task must reference at least one concrete repository-relative file path.
+
+Do not claim that proposed files already exist. Treat them as planned files unless the source inputs establish otherwise.
+
+Do not introduce additional frameworks, packages, databases, build tools, deployment systems, or infrastructure without support from the approved design.
+
+==================================================
+7. REQUIRED TASK BLOCK FORMAT
+==================================================
+
+Use exactly one task ID per task block.
+
+Each task block must follow this common structure:
+
+### DB-001: Specific task title
+
+- Task ID: DB-001
+- Worker type: One supported worker type
+- Objective: One specific, independently verifiable objective.
+- Files to create or modify:
+  - path/to/file
+- Scope and implementation details:
+  - Concrete responsibilities, fields, interfaces, or behavior.
+- Dependencies (task IDs): None
+- Acceptance criteria:
+  - Concrete, observable checks that establish completion.
+
+Use the appropriate prefix and a unique sequential ID for every task.
+
+For backend tasks, include API contracts where relevant:
+- HTTP method and route.
+- Purpose.
+- Request fields and validation.
+- Response structure and status codes.
+- Authentication and authorization behavior.
+- Relevant error handling.
+
+Include only contract details supported by the inputs or explicitly labeled assumptions. Do not invent business rules.
+
+For frontend tasks, include where relevant:
+- Pages and components.
+- User interactions and form validation.
+- State management and navigation.
+- Backend endpoints consumed.
+- Loading, empty, success, and error states where appropriate.
+- Responsive behavior if required.
+
+For database tasks, include where relevant:
+- Entities or collections.
+- Fields and data types when supported.
+- Relationships and constraints.
+- Indexes when justified by access patterns or requirements.
+- Migration or schema-management approach consistent with the design.
+
+For integration and testing tasks, include where relevant:
+- Components or interfaces being verified.
+- Test files.
+- Test scenarios and expected outcomes.
+- Authentication, authorization, validation, and data-isolation checks where applicable.
+- Required test commands only when the toolchain is known.
+
+Every task must include Task ID, worker type, objective, file paths, scope and
+implementation details, dependencies, and acceptance criteria.
+
+Never group IDs in one task block.
+Never repeat an ID for a different task.
+Never use a dependency that is not declared in the plan.
+Use "None" when no prerequisite exists.
+
+==================================================
+8. DATABASE AND DATA CONTRACT CONSISTENCY
+==================================================
+
+Define required data structures before tasks that depend on them.
+
+Follow the approved database technology:
+- For relational databases, describe supported tables, columns, relationships, and constraints.
+- For document databases, describe supported collections, document fields, and relevant references or indexes.
+- For other storage systems, use the model appropriate to the approved design.
+
+Do not mix database paradigms without an explicit architectural reason.
+
+Use consistent entity names and field names across database, backend, frontend, and testing tasks.
+
+Do not add speculative fields, roles, permissions, or business rules.
+
+When an entity detail is not specified, state the uncertainty rather than fabricating a definitive schema.
+
+==================================================
+9. API AND COMPONENT CONTRACT CONSISTENCY
+==================================================
+
+Backend API contracts are the reference for frontend integration.
+
+Where the design supports it, specify:
+- Route and HTTP method.
+- Request shape.
+- Response shape.
+- Validation rules.
+- Relevant error cases.
+- Authentication and authorization requirements.
+
+Ensure that frontend tasks consume only endpoints declared in backend tasks.
+
+Ensure that backend tasks use the approved data model and consistent entity definitions.
+
+If an API contract cannot be determined from the inputs, record it as an unresolved decision or a minimal explicit assumption.
+
+Do not invent endpoints solely to populate the plan.
+
+Do not create duplicate endpoints for the same operation without a documented requirement.
+
+==================================================
+10. DEPENDENCY GRAPH AND EXECUTION READINESS
+==================================================
+
+Build a directed acyclic task-dependency graph.
+
+A dependency means that the dependent task genuinely needs an artifact, contract, or completed result from the prerequisite task.
+
+Examples of legitimate dependency relationships include:
+- Backend implementation depending on a required data model.
+- Frontend integration depending on an established API contract.
+- Integration testing depending on the components it verifies.
+
+These are examples of dependency reasoning, not mandatory task sequences. Use only dependencies appropriate to the actual project.
+
+Mandatory rules:
+1. Every task ID is unique.
+2. Every dependency references an existing task.
+3. No task depends on itself.
+4. No circular dependencies exist.
+5. Tasks with no prerequisites use "None".
+6. Do not infer a dependency merely because another task appears earlier in the plan.
+7. Do not make database tasks depend on backend implementation when the backend depends on the database.
+8. Do not make implementation tasks depend on the tests that verify them.
+9. Declare prerequisites needed for safe parallel execution.
+10. Independent tasks should remain independent.
+11. Every required task must be reachable in the final execution order.
+12. If a prerequisite is unresolved, identify the blocker instead of fabricating a dependency.
+
+The plan must support a downstream orchestrator that selects tasks whose dependencies are complete.
+
+Do not imply that a task is complete merely because it appears in the plan.
+
+==================================================
+11. ACCEPTANCE CRITERIA
+==================================================
+
+Acceptance criteria must be verifiable by a worker or automated test.
+
+Prefer criteria such as:
+- A required operation returns the expected response for valid input.
+- Invalid input is rejected according to the defined contract.
+- A data model enforces a specified constraint.
+- A component renders the required information.
+- A transaction can be created, retrieved, updated, or deleted as required.
+- A test confirms the expected behavior.
+- The application builds or starts using the approved toolchain.
+
+Use only criteria relevant to the project and supported by the inputs.
+
+Avoid vague criteria such as:
+- "Feature works correctly."
+- "Implement the module properly."
+- "Make the UI good."
+- "Ensure everything is complete."
+
+Do not claim that a test has passed. Acceptance criteria describe future verification, not completed results.
+
+==================================================
+12. INTEGRATION AND TESTING COVERAGE
+==================================================
+
+Include explicit integration and testing task blocks.
+
+Cover the most important user workflows and component boundaries.
+
+Where applicable, consider:
+- Unit tests for business logic.
+- API tests for request validation and responses.
+- Database behavior and constraints.
+- Frontend interactions and form validation.
+- Authentication and authorization.
+- Data isolation between users or tenants when required.
+- Integration between frontend, backend, and database.
+- Error and empty states.
+- Configuration and application startup.
+
+Select tests according to actual requirements and available testing tools.
+
+Do not invent unsupported services or test infrastructure.
+
+Testing tasks must reference the implementation tasks they verify when a real dependency exists.
+
+Do not mark the whole application complete solely because the project structure exists or because individual files have been created.
+
+==================================================
+13. REQUIRED OUTPUT SECTIONS
+==================================================
+
+Return Markdown with these eight top-level sections in this exact order:
+
+# Implementation Plan
+
+## 1. Project Summary
+
+Include:
+- Product purpose.
+- Approved frontend technology.
+- Approved backend technology.
+- Approved database technology.
+- Approved testing technology.
+- Architecture style, or "Not specified".
+- Key requirements.
+- Explicit assumptions and unresolved decisions.
+
+Use the actual project details. Never use template placeholders.
+
+## 2. Project Structure
+
+Provide a concise repository-relative directory tree.
+
+The tree must agree with the file paths used in the task blocks.
+
+## 3. Database Tasks
+
+Provide separate DB task blocks for required database work.
+
+If no database work is required, state that explicitly and do not invent database tasks.
+
+## 4. Backend Tasks
+
+Provide separate BE task blocks for required backend work.
+
+If no backend work is required, state that explicitly and do not invent backend tasks.
+
+## 5. Frontend Tasks
+
+Provide separate FE task blocks for required frontend work.
+
+If no frontend work is required, state that explicitly and do not invent frontend tasks.
+
+## 6. Integration and Testing Tasks
+
+Provide separate INT task blocks for relevant integration and testing work.
+
+If no separate integration/testing work is required, explain why. Do not create meaningless tasks merely to fill this section.
+
+## 7. Execution Order
+
+List every declared task ID exactly once in a valid dependency-respecting order.
+
+Use a numbered list containing task IDs only, for example:
+
+1. DB-001
+2. BE-001
+3. FE-001
+4. INT-001
+
+The IDs above are illustrative. Generate the actual IDs for the supplied project.
+
+Do not create new task IDs in this section.
+Do not omit declared tasks.
+Do not repeat task IDs.
+Where multiple tasks can run in parallel, preserve their valid dependencies without imposing unnecessary prerequisites.
+
+## 8. Handoff to the Project Blueprint Generator
+
+Provide a concise handoff containing:
+- Project purpose and required behavior.
+- Approved technology decisions.
+- Required components and their responsibilities.
+- Entities and relationships supported by the inputs.
+- API contracts and component interfaces.
+- Proposed repository structure.
+- Task IDs, worker types, and declared dependencies.
+- Acceptance criteria and integration requirements.
+- Required environment variable names only, when known.
+- Explicit assumptions, unresolved decisions, and blockers.
+
+Use the task IDs exactly as declared in the task blocks.
+
+Do not create, rename, group, or omit task IDs in the handoff.
+
+==================================================
+14. FINAL INTERNAL VALIDATION
+==================================================
+
+Before returning the plan, internally check all of the following:
+
+PROJECT CORRECTNESS
+- The summary describes the actual user request.
+- Required functionality is covered by implementation or testing tasks.
+- The approved technology stack has not been silently changed.
+- No unrelated application examples or generic templates remain.
+
+TASK STRUCTURE
+- Every task has exactly one unique ID.
+- IDs use the permitted category prefixes.
+- Numbering is sequential within each category.
+- Every task contains Task ID, worker type, objective, file paths, scope and implementation details, dependencies, and acceptance criteria.
+- Every task has at least one repository-relative file path.
+- Each task has a clear implementation boundary.
+
+CROSS-COMPONENT CONSISTENCY
+- Entity and field names are consistent.
+- API routes and contracts are consistent.
+- Frontend tasks consume declared backend contracts.
+- File paths match across the directory tree, tasks, and handoff.
+- No unsupported technologies or external services are introduced.
+
+DEPENDENCY CORRECTNESS
+- All dependencies reference declared tasks.
+- No self-dependencies exist.
+- No dependency cycles exist.
+- Execution order respects every dependency.
+- Every declared task appears exactly once in execution order.
+
+DOWNSTREAM READINESS
+- The plan can be converted into structured task objects.
+- Worker types are supported by the downstream system.
+- Task objectives and acceptance criteria are sufficiently concrete.
+- The handoff agrees with the declared tasks.
+- Assumptions and unresolved decisions are clearly distinguished from facts.
+
+OUTPUT VALIDITY
+- All eight sections are present in the specified order.
+- No placeholder text remains.
+- No illustrative example is mistaken for an actual task.
+- No implementation code is included.
+- The response contains the completed plan only.
+
+If an input does not provide enough information to make a safe decision, record the uncertainty explicitly. Do not fabricate details merely to pass validation.
+
+Return the complete project-specific implementation plan in Markdown.
     """
 
 
+    def extract_text(response) -> str:
+        """Normalize a LangChain model response into plain text."""
+        content = response.content
+
+        if isinstance(content, str):
+            return content.strip()
+
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+                elif isinstance(block, str):
+                    parts.append(block)
+            return "\n".join(parts).strip()
+
+        return str(content).strip()
+
+    task_heading_pattern = re.compile(
+        r"^###\s+((?:DB|BE|FE|INT)-\d{3}):\s*(.+\S)\s*$",
+        re.MULTILINE | re.IGNORECASE,
+    )
+
+    def has_valid_task_headings(plan: str) -> bool:
+        """Check for parser-compatible implementation task headings."""
+        return bool(task_heading_pattern.search(plan))
+
+
+    def find_template_placeholders(plan: str) -> list[str]:
+        """Find common unresolved placeholders in generated plans."""
+        markers = [
+            "[Insert ",
+            "[Project purpose]",
+            "[Frontend technology]",
+            "[Backend technology]",
+            "[Database technology]",
+            "[Testing technology]",
+            "[Insert project purpose]",
+            "[Insert frontend technology]",
+            "[Insert backend technology]",
+            "[Insert database technology]",
+            "[Insert testing technology]",
+        ]
+
+        lowered = plan.casefold()
+        return [
+            marker
+            for marker in markers
+            if marker.casefold() in lowered
+        ]
+
+
+    def has_complete_task_blocks(plan: str) -> bool:
+        """Check mandatory fields and acceptance criteria for every task."""
+
+        matches = list(task_heading_pattern.finditer(plan))
+
+        if not matches:
+            print("Validation failed: no valid task headings found.")
+            return False
+
+        task_ids = [match.group(1).upper() for match in matches]
+        if len(task_ids) != len(set(task_ids)):
+            print("Validation failed: duplicate task IDs found.")
+            return False
+
+        required_fields = [
+            "Task ID",
+            "Worker type",
+            "Objective",
+            "Files to create or modify",
+            "Scope and implementation details",
+            "Dependencies (task IDs)",
+            "Acceptance criteria",
+        ]
+
+        field_pattern_template = (
+            r"(?im)^\s*[-*+]\s+\*{{0,2}}\s*{}\s*"
+            r"\*{{0,2}}\s*:\s*\*{{0,2}}"
+        )
+        field_label_alternation = "|".join(
+            re.escape(field) for field in required_fields
+        )
+        section_end_pattern = (
+            r"(?=^\s*[-*+]\s+\*{0,2}\s*(?:"
+            + field_label_alternation
+            + r")\s*\*{0,2}\s*:\s*\*{0,2}|^##\s|\Z)"
+        )
+
+        for index, match in enumerate(matches):
+            task_id = match.group(1).upper()
+
+            end = (
+                matches[index + 1].start()
+                if index + 1 < len(matches)
+                else len(plan)
+            )
+
+            block = plan[match.end():end]
+
+            for field in required_fields:
+                field_pattern = re.compile(
+                    field_pattern_template.format(re.escape(field))
+                )
+
+                if not field_pattern.search(block):
+                    print(
+                        f"Incomplete task {task_id}: "
+                        f"missing field '{field}'"
+                    )
+                    return False
+
+            task_id_pattern = re.compile(
+                r"(?im)^\s*[-*+]\s+\*{0,2}\s*Task ID\s*\*{0,2}\s*:"
+                r"\s*\*{0,2}\s*"
+                + re.escape(task_id)
+                + r"\s*\*{0,2}\s*$"
+            )
+            task_id_field_pattern = re.compile(
+                field_pattern_template.format(re.escape("Task ID"))
+            )
+            if (
+                len(task_id_field_pattern.findall(block)) != 1
+                or not task_id_pattern.search(block)
+            ):
+                print(
+                    f"Invalid task {task_id}: Task ID field is missing "
+                    "or does not match the heading."
+                )
+                return False
+
+            criteria_pattern = re.compile(
+                r"(?ims)^\s*[-*+]\s+\*{0,2}\s*Acceptance criteria"
+                r"\s*\*{0,2}\s*:\s*\*{0,2}(.*?)"
+                + section_end_pattern
+            )
+            criteria_match = criteria_pattern.search(block)
+
+            if not criteria_match:
+                print(
+                    f"Incomplete task {task_id}: "
+                    "Acceptance criteria section was not found."
+                )
+                return False
+
+            files_pattern = re.compile(
+                r"(?ims)^\s*[-*+]\s+\*{0,2}\s*Files to create or modify"
+                r"\s*\*{0,2}\s*:\s*\*{0,2}(.*?)"
+                + section_end_pattern
+            )
+            files_match = files_pattern.search(block)
+            file_paths = (
+                re.findall(
+                    r"(?m)^\s*[-*+]\s+`?([^`\s]+)`?\s*$",
+                    files_match.group(1),
+                )
+                if files_match
+                else []
+            )
+            def is_repository_relative_file(file_path: str) -> bool:
+                normalized_path = file_path.replace("\\", "/")
+                parts = normalized_path.split("/")
+                root_file_names = {"dockerfile", "makefile", "license", "notice", "procfile"}
+                has_file_name = (
+                    len(parts) > 1
+                    or bool(re.search(r"\.[A-Za-z0-9_-]+$", parts[-1]))
+                    or parts[-1].casefold() in root_file_names
+                )
+                return (
+                    has_file_name
+                    and not normalized_path.startswith("/")
+                    and not re.match(r"^[A-Za-z]:", normalized_path)
+                    and all(part not in {"", ".", ".."} for part in parts)
+                )
+
+            has_relative_path = any(
+                is_repository_relative_file(file_path)
+                for file_path in file_paths
+            )
+            if not has_relative_path:
+                print(
+                    f"Incomplete task {task_id}: "
+                    "no repository-relative file path found."
+                )
+                return False
+
+            criteria_bullets = re.findall(
+                r"(?m)^\s*[-*+]\s+(.+?)\s*$",
+                criteria_match.group(1),
+            )
+
+            if not criteria_bullets:
+                print(
+                    f"Incomplete task {task_id}: "
+                    "Acceptance criteria contains no bullets."
+                )
+                return False
+
+        return True
+
+
+    def is_usable_plan(plan: str) -> bool:
+        """Check that the plan meets the Blueprint Generator's contract."""
+
+        return (
+            bool(plan.strip())
+            and has_valid_task_headings(plan)
+            and not find_template_placeholders(plan)
+            and has_complete_task_blocks(plan)
+        )
+    
     response = planner_llm.invoke(prompt)
-
-    if isinstance(response.content, str):
-        task_plan = response.content.strip()
-    elif isinstance(response.content, list):
-        task_plan = "\n".join(
-            block.get("text", "")
-            for block in response.content
-            if isinstance(block, dict) and block.get("type") == "text"
-        ).strip()
-    else:
-        task_plan = str(response.content).strip()
-
+    task_plan = extract_text(response)
     if not task_plan:
         raise ValueError("Task Planner returned an empty implementation plan.")
+
+    if not is_usable_plan(task_plan):
+        print(
+            "Task Planner output failed validation. "
+            "Requesting one structured repair attempt..."
+        )
+
+        repair_prompt = f"""
+You are repairing an invalid implementation plan for an AI software development system.
+
+ORIGINAL USER REQUEST:
+{user_request}
+
+ANALYZED REQUIREMENTS:
+{requirements}
+
+APPROVED TECHNICAL DESIGN:
+{design}
+
+PREVIOUS PLAN THAT FAILED VALIDATION:
+{task_plan}
+
+Your task is to rewrite the COMPLETE implementation plan for this exact project.
+Do not merely explain the errors. Do not return a template or a list of suggested fixes.
+
+NON-NEGOTIABLE OUTPUT CONTRACT:
+- Return the eight sections specified below, in order.
+- Every implementation task must have its own Markdown heading.
+- Use only these heading forms:
+  ### DB-001: Specific database task title
+  ### BE-001: Specific backend task title
+  ### FE-001: Specific frontend task title
+  ### INT-001: Specific integration or testing task title
+- Each task block must contain:
+  - Task ID: the exact ID in its heading
+  - Worker type: use a supported worker type
+  - Objective: one concrete objective
+  - Files to create or modify: repository-relative paths
+  - Scope and implementation details: concrete task responsibilities
+  - Dependencies (task IDs): declared IDs or None
+  - Acceptance criteria: concrete, verifiable outcomes
+- Use unique, sequential IDs within each category.
+- Every dependency must refer to an existing task.
+- Do not create dependency cycles.
+- Every declared task must appear exactly once in Execution Order.
+- Never represent tasks only as bullet points.
+- Never include placeholders such as "[Insert project purpose]".
+- Do not invent an architecture, technology, test framework, API, entity, or feature.
+- Treat the approved technical design as authoritative for technology choices.
+- If a detail is missing, explicitly state "Not specified" or record a clearly labelled assumption.
+- Keep paths, entities, API contracts, task IDs, and dependencies consistent.
+- Return only the corrected Markdown plan.
+
+REQUIRED TOP-LEVEL SECTIONS:
+# Implementation Plan
+## 1. Project Summary
+## 2. Project Structure
+## 3. Database Tasks
+## 4. Backend Tasks
+## 5. Frontend Tasks
+## 6. Integration and Testing Tasks
+## 7. Execution Order
+## 8. Handoff to the Project Blueprint Generator
+
+Complete valid task block:
+### DB-001: Define the task data model
+- Task ID: DB-001
+- Worker type: database
+- Objective: Define the persistent task data model.
+- Files to create or modify:
+  - database/models/task.py
+- Scope and implementation details:
+  - Define the task fields supported by the requirements and design.
+- Dependencies (task IDs): None
+- Acceptance criteria:
+  - The model contains the required fields.
+
+Project-specific details must come from the original request, requirements, and approved design above.
+Generate concrete tasks for the actual project, not generic tasks such as "implement backend API".
+"""
+
+        repair_response = planner_llm.invoke(repair_prompt)
+        task_plan = extract_text(repair_response)
+
+    # Final gate: malformed output must never be sent to the Blueprint Generator.
+    if not task_plan:
+        raise ValueError(
+            "Task Planner returned an empty plan after the repair attempt."
+        )
+
+    if not has_valid_task_headings(task_plan):
+        raise ValueError(
+            "Task Planner failed to produce parser-compatible task headings "
+            "after the repair attempt. Expected headings such as "
+            "'### DB-001: Define the database schema'. "
+            "Inspect the model response before continuing."
+        )
+
+    found_placeholders = find_template_placeholders(task_plan)
+    if found_placeholders:
+        raise ValueError(
+            "Task Planner still returned unresolved template placeholders "
+            f"after the repair attempt: {found_placeholders}. "
+            "The invalid plan was blocked before Blueprint generation."
+        )
+
+    if not has_complete_task_blocks(task_plan):
+        raise ValueError(
+            "Task Planner returned an incomplete or invalid plan after "
+            "the repair attempt. The plan was blocked before Blueprint "
+            "generation."
+        )
 
     return task_plan

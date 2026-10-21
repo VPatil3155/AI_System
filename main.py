@@ -18,6 +18,12 @@ from blueprint_agent import (
 from blueprint_agent import ProjectBlueprint
 from scaffolder import scaffold_project
 
+from orchestrator import (
+    initialize_task_registry,
+    select_next_task,
+    get_execution_summary,
+)
+
 load_dotenv()
 
 
@@ -37,6 +43,9 @@ class ProjectState(TypedDict):
     blueprint: dict
     blueprint_json: str
     scaffold_result: dict
+    task_registry: dict
+    current_task: dict
+    execution_summary: dict
 
 
 # --------------------------------------------------
@@ -284,18 +293,41 @@ def task_planner_node(state: ProjectState) -> dict:
             "Task Planner returned an empty implementation plan."
         )
 
+    # Define placeholders BEFORE checking the generated plan.
+    placeholder_markers = [
+        "[Insert product purpose]",
+        "[Insert approved frontend technology]",
+        "[Insert approved backend technology]",
+        "[Insert approved database technology]",
+        "[Insert approved testing technology]",
+    ]
+
+    found_placeholders = [
+        marker
+        for marker in placeholder_markers
+        if marker.lower() in task_plan.lower()
+    ]
+
+    if found_placeholders:
+        raise ValueError(
+            "Task Planner returned a template instead of a "
+            "project-specific plan. Found placeholders: "
+            f"{found_placeholders}. Fix task_planner.py and retry."
+        )
+
     print("\n========== ACTUAL TASK PLAN ==========\n")
     print(task_plan)
     print("\n========== END TASK PLAN ==========\n")
 
     return {"task_plan": task_plan}
 
-
 # --------------------------------------------------
 # 9. Blueprint Agent
 # --------------------------------------------------
 
 def blueprint_agent_node(state: ProjectState) -> dict:
+    print("TASK PLAN BEING SENT TO BLUEPRINT:")
+    print(state["task_plan"][:3000])
     blueprint = create_project_blueprint(
         user_request=state["user_request"],
         requirements=state["requirements"],
@@ -325,6 +357,41 @@ def scaffolder_node(state: ProjectState) -> dict:
     }
 
 # --------------------------------------------------
+# 11. Orchestrator
+# --------------------------------------------------
+
+def orchestrator_node(state: ProjectState) -> dict:
+    """
+    Initialize task tracking and select the next executable task.
+    Does not execute tasks or mark them as completed.
+    """
+    blueprint = ProjectBlueprint.model_validate(state["blueprint"])
+
+    registry = initialize_task_registry(blueprint)
+    current_task = select_next_task(registry)
+    summary = get_execution_summary(registry)
+
+    print("\n========== ORCHESTRATOR ==========")
+    print(f"Project: {blueprint.project_name}")
+    print(f"Total tasks: {summary['total_tasks']}")
+    print(f"Ready tasks: {summary['ready_task_ids']}")
+
+    if current_task:
+        print(f"Selected task: {current_task['task_id']}")
+        print(f"Worker type: {current_task['worker_type']}")
+        print(f"Objective: {current_task['objective']}")
+    else:
+        print("No task is ready for execution.")
+
+    print("==================================\n")
+
+    return {
+        "task_registry": registry,
+        "current_task": current_task or {},
+        "execution_summary": summary,
+    }
+
+# --------------------------------------------------
 # 11. Build graph
 # --------------------------------------------------
 
@@ -337,6 +404,7 @@ builder.add_node("human_approval", human_approval)
 builder.add_node("task_planner", task_planner_node)
 builder.add_node("blueprint_agent", blueprint_agent_node)
 builder.add_node("scaffolder", scaffolder_node)
+builder.add_node("orchestrator", orchestrator_node)
 
 builder.add_edge(START, "requirement_agent")
 builder.add_edge("requirement_agent", "design_agent")
@@ -362,7 +430,8 @@ builder.add_conditional_edges(
 
 builder.add_edge("task_planner", "blueprint_agent")
 builder.add_edge("blueprint_agent", "scaffolder")
-builder.add_edge("scaffolder", END)
+builder.add_edge("scaffolder", "orchestrator")
+builder.add_edge("orchestrator", END)
 
 checkpointer = MemorySaver()
 graph = builder.compile(checkpointer=checkpointer)
