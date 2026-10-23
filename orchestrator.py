@@ -216,3 +216,33 @@ def get_execution_summary(registry: dict[str, dict]) -> dict:
         "all_completed": counts["completed"] == len(registry),
         "has_failures": counts["failed"] > 0,
     }
+
+def record_worker_result(
+    registry: dict[str, dict],
+    result: dict,
+) -> None:
+    """Record a worker result and update its task status."""
+    task_id = result.get("task_id")
+
+    if task_id not in registry:
+        raise KeyError(f"Unknown task ID: {task_id}")
+
+    status = result.get("status")
+
+    if status not in {"completed", "failed"}:
+        raise ValueError(f"Invalid worker result status: {status}")
+
+    task = registry[task_id]
+
+    if task["status"] != "running":
+        raise ValueError(
+            f"Task {task_id} is not running; cannot record its result."
+        )
+
+    task["result"] = result
+    update_task_status(
+        registry,
+        task_id,
+        status,
+        error=result.get("error"),
+    )

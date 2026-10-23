@@ -1,13 +1,14 @@
 
 from langchain_ollama import ChatOllama
 
-from typing import TypedDict
+from typing import Annotated,  TypedDict
 
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import interrupt
+from langgraph.types import interrupt, Send
 from langgraph.checkpoint.memory import MemorySaver
+import operator
 
 from task_planner import create_task_plan
 from blueprint_agent import (
@@ -17,11 +18,15 @@ from blueprint_agent import (
 
 from blueprint_agent import ProjectBlueprint
 from scaffolder import scaffold_project
+from worker_node import worker_node
 
 from orchestrator import (
     initialize_task_registry,
+    get_ready_tasks,
     select_next_task,
     get_execution_summary,
+    update_task_status,
+    record_worker_result,
 )
 
 load_dotenv()
@@ -46,6 +51,7 @@ class ProjectState(TypedDict):
     task_registry: dict
     current_task: dict
     execution_summary: dict
+    worker_results: Annotated[list[dict], operator.add]
 
 
 # --------------------------------------------------
@@ -366,8 +372,11 @@ def orchestrator_node(state: ProjectState) -> dict:
     Does not execute tasks or mark them as completed.
     """
     blueprint = ProjectBlueprint.model_validate(state["blueprint"])
+    
+    registry = state.get("task_registry")
 
-    registry = initialize_task_registry(blueprint)
+    if not registry:
+        registry = initialize_task_registry(blueprint)
     current_task = select_next_task(registry)
     summary = get_execution_summary(registry)
 
@@ -391,6 +400,57 @@ def orchestrator_node(state: ProjectState) -> dict:
         "execution_summary": summary,
     }
 
+def dispatch_workers(state: ProjectState) -> list[Send]:
+    registry = state["task_registry"]
+    ready_tasks = get_ready_tasks(registry)
+    dispatches = []
+
+    for task in ready_tasks:
+        update_task_status(
+            registry,
+            task["task_id"],
+            "running",
+        )
+
+        dispatches.append(
+            Send(
+                "worker",
+                {"task": task},
+            )
+        )
+
+    return dispatches
+
+def collect_worker_results(state: ProjectState) -> dict:
+    registry = state["task_registry"]
+    results = state.get("worker_results", [])
+
+    for result in results:
+        task_id = result.get("task_id")
+
+        if task_id not in registry:
+            raise KeyError(f"Unknown task ID: {task_id}")
+
+        if registry[task_id]["status"] != "running":
+            continue
+
+        record_worker_result(registry, result)
+
+    return {
+        "task_registry": registry,
+        "execution_summary": get_execution_summary(registry),
+    }
+
+def route_after_collection(state: ProjectState) -> str:
+    summary = get_execution_summary(state["task_registry"])
+
+    if summary["all_completed"] or summary["has_failures"]:
+        return "end"
+
+    if summary["ready_task_ids"]:
+        return "orchestrator"
+
+    return "end"
 # --------------------------------------------------
 # 11. Build graph
 # --------------------------------------------------
@@ -405,6 +465,8 @@ builder.add_node("task_planner", task_planner_node)
 builder.add_node("blueprint_agent", blueprint_agent_node)
 builder.add_node("scaffolder", scaffolder_node)
 builder.add_node("orchestrator", orchestrator_node)
+builder.add_node("worker", worker_node)
+builder.add_node("collect_worker_results", collect_worker_results)
 
 builder.add_edge(START, "requirement_agent")
 builder.add_edge("requirement_agent", "design_agent")
@@ -431,7 +493,23 @@ builder.add_conditional_edges(
 builder.add_edge("task_planner", "blueprint_agent")
 builder.add_edge("blueprint_agent", "scaffolder")
 builder.add_edge("scaffolder", "orchestrator")
-builder.add_edge("orchestrator", END)
+
+builder.add_conditional_edges(
+    "orchestrator",
+    dispatch_workers,
+    ["worker"],
+)
+
+builder.add_edge("worker", "collect_worker_results")
+
+builder.add_conditional_edges(
+    "collect_worker_results",
+    route_after_collection,
+    {
+        "orchestrator": "orchestrator",
+        "end": END,
+    },
+)
 
 checkpointer = MemorySaver()
 graph = builder.compile(checkpointer=checkpointer)

@@ -866,6 +866,22 @@ project_name must be a filesystem-safe slug:
 Example: "Task Management Application" becomes
 "task-management-application".
 
+PROJECT NAMING RULES
+
+Generate project_name based on the actual user request and
+the application's primary purpose.
+
+Rules:
+- Do not copy names from examples in this prompt.
+- Do not use generic placeholder names.
+- If the user provides no explicit project name, invent a
+  concise, meaningful name that reflects the requested application.
+- If the user provides a name, use it only if it accurately
+  represents the requested project.
+- Convert the chosen name into a lowercase, filesystem-safe slug.
+- Keep the name consistent throughout the blueprint.
+
+The project name must be specific to the current request.
 """
 
     
