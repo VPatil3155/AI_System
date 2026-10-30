@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
+    .hint { font-size: 12px; opacity: .72; margin: 0 0 8px; }
+    #design {
+      box-sizing: border-box; width: 100%; max-height: 420px; overflow: auto;
+      padding: 16px; border: 1px solid rgba(128,128,128,.45);
+      border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere;
+      line-height: 1.55; font-size: 14px; user-select: text;
+      background: rgba(128,128,128,.06);
+    }
+    #design::selection { background: #8ab4f8; color: #111; }
+  </style>
+</head>
+<body>
+  <p class="hint">Drag to highlight the exact text you want to revise.</p>
+  <div id="design" tabindex="0"></div>
+  <script>
+    const designEl = document.getElementById("design");
+    let latestArgs = {};
+    let lastSent = null;
+
+    function sendMessage(type, extra = {}) {
+      window.parent.postMessage(
+        Object.assign({ isStreamlitMessage: true, type }, extra),
+        "*"
+      );
+    }
+
+    function setComponentValue(value) {
+      sendMessage("streamlit:setComponentValue", { value });
+    }
+
+    function render(args) {
+      latestArgs = args || {};
+      designEl.textContent = typeof latestArgs.design === "string"
+        ? latestArgs.design
+        : "";
+    }
+
+    designEl.addEventListener("mouseup", () => {
+      const selection = window.getSelection();
+      const selected = selection ? selection.toString() : "";
+      if (selected !== lastSent) {
+        lastSent = selected;
+        setComponentValue(selected);
+      }
+    });
+
+    designEl.addEventListener("keyup", (event) => {
+      if (event.shiftKey || event.key === "Shift") {
+        const selection = window.getSelection();
+        const selected = selection ? selection.toString() : "";
+        if (selected !== lastSent) {
+          lastSent = selected;
+          setComponentValue(selected);
+        }
+      }
+    });
+
+    window.addEventListener("message", (event) => {
+      const message = event.data || {};
+      if (message.type === "streamlit:render") {
+        render(message.args || {});
+      }
+    });
+
+    sendMessage("streamlit:componentReady", { apiVersion: 1 });
+    sendMessage("streamlit:setFrameHeight", { height: 490 });
+  </script>
+</body>
+</html>

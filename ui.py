@@ -1,10 +1,19 @@
 
 import uuid
+import hashlib
+from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 from langgraph.types import Command
 
 from main import graph
+
+
+_design_selection_component = components.declare_component(
+    "design_selection",
+    path=str(Path(__file__).parent / "design_selection_component"),
+)
 
 
 # --------------------------------------------------
@@ -31,6 +40,8 @@ DEFAULTS = {
     "task_plan": "",
     "human_decision": "",
     "human_feedback": "",
+    "selected_design_text": "",
+    "revision_comment": "",
     "workflow_started": False,
     "waiting_for_human": False,
     "workflow_completed": False,
@@ -64,6 +75,7 @@ def reset_workflow():
         st.session_state[key] = value
 
     st.session_state.pop("human_feedback_input", None)
+    st.session_state.pop("revision_comment_input", None)
 
 
 def sync_graph_state():
@@ -108,23 +120,33 @@ def resume_workflow(decision, feedback):
             "Start a new project and inspect the checkpoint."
         )
 
-    if not snapshot.interrupts:
+    if not snapshot.interrupts or "human_approval" not in snapshot.next:
         raise ValueError(
             "The graph is not waiting at a human approval "
             "interrupt. Do not resume this checkpoint."
         )
 
-    graph.invoke(
-        Command(
-            resume={
-                "decision": decision,
-                "feedback": feedback,
-            }
-        ),
-        config=config,
-    )
-
-    sync_graph_state()
+    try:
+        graph.invoke(
+            Command(
+                resume={
+                    "decision": decision,
+                    "feedback": feedback,
+                }
+            ),
+            config=config,
+        )
+    except Exception:
+        # The interrupt is consumed before downstream nodes run. Keep the UI
+        # aligned with the checkpoint even if a later node raises, while
+        # preserving the original planner/workflow exception.
+        try:
+            sync_graph_state()
+        except Exception as sync_error:
+            print("Could not sync graph state after workflow failure:", sync_error)
+        raise
+    else:
+        sync_graph_state()
 
 
 # --------------------------------------------------
@@ -190,6 +212,8 @@ if submitted:
             "ai_review": "",
             "human_decision": "",
             "human_feedback": "",
+    "selected_design_text": "",
+    "revision_comment": "",
             "task_plan": "",
         }
 
@@ -240,12 +264,6 @@ if st.session_state["workflow_started"]:
         else:
             st.info("The requirements analysis is not available yet.")
 
-    with st.expander("🏗️ Proposed technical design", expanded=False):
-        if st.session_state["design"]:
-            st.markdown(st.session_state["design"])
-        else:
-            st.info("The proposed design is not available yet.")
-
     st.subheader("AI Review")
 
     if st.session_state["ai_review"]:
@@ -271,14 +289,39 @@ if (
         "Review it and decide whether to continue or request changes."
     )
 
-    feedback = st.text_area(
-        "Would you like to change anything?",
+    st.markdown(
+        "Highlight any text in the design below, then describe the change you want."
+    )
+
+    design_text = st.session_state.get("design", "")
+    selected_text = _design_selection_component(
+        design=design_text,
+        key=(
+            "design_selection_"
+            + str(st.session_state.get("thread_id"))
+            + "_"
+            + hashlib.sha256(design_text.encode("utf-8")).hexdigest()[:12]
+        ),
+        default="",
+    )
+    if isinstance(selected_text, str):
+        st.session_state["selected_design_text"] = selected_text
+
+    selected_text = st.session_state.get("selected_design_text", "")
+    if selected_text.strip():
+        st.caption("Selected text")
+        st.code(selected_text, language=None)
+    else:
+        st.info("Highlight a portion of the design above to select it.")
+
+    revision_comment = st.text_area(
+        "What should change about this selection?",
         placeholder=(
-            "For example: Add email notifications, make the "
-            "app easier to use, or include another feature."
+            "For example: Replace MongoDB with PostgreSQL because "
+            "the application needs relational data and transactions."
         ),
         height=110,
-        key="human_feedback_input",
+        key="revision_comment_input",
     )
 
     col1, col2 = st.columns(2)
@@ -300,7 +343,7 @@ if (
     if approve_clicked:
         try:
             with st.spinner("Creating the implementation plan..."):
-                resume_workflow("APPROVED", feedback.strip())
+                resume_workflow("APPROVED", "")
 
             if st.session_state["workflow_completed"]:
                 st.success("Your implementation plan is ready.")
@@ -315,23 +358,40 @@ if (
             st.rerun()
 
         except Exception as error:
+            st.session_state["workflow_error"] = str(error)
             st.error("We couldn't continue the workflow.")
             st.exception(error)
 
     if revision_clicked:
-        if not feedback.strip():
-            st.warning(
-                "Please tell us what you would like to change."
-            )
+        if not selected_text.strip():
+            st.warning("Please select a portion of the design first.")
+        elif not revision_comment.strip():
+            st.warning("Please describe how you want the selected text changed.")
         else:
+            revision_feedback = f"""TARGETED DESIGN REVISION
+
+SELECTED DESIGN TEXT:
+{selected_text.strip()}
+
+USER COMMENT:
+{revision_comment.strip()}
+
+REVISION INSTRUCTIONS:
+Revise the selected portion according to the user's comment.
+Update other sections only when necessary for consistency.
+Preserve unrelated design decisions, requirements, and features.
+Return the complete revised design, not only the selected text.
+"""
             try:
                 with st.spinner(
-                    "Updating the design based on your feedback..."
+                    "Updating the design based on your selected text..."
                 ):
                     resume_workflow(
                         "NEEDS_REVISION",
-                        feedback.strip(),
+                        revision_feedback,
                     )
+                    st.session_state["selected_design_text"] = ""
+                    st.session_state["revision_comment"] = ""
 
                 if st.session_state["waiting_for_human"]:
                     st.success(
@@ -346,6 +406,7 @@ if (
                 st.rerun()
 
             except Exception as error:
+                st.session_state["workflow_error"] = str(error)
                 st.error("We couldn't update the design.")
                 st.exception(error)
 
@@ -354,14 +415,20 @@ if (
 # IMPLEMENTATION PLAN
 # --------------------------------------------------
 
-if st.session_state["workflow_completed"]:
+if st.session_state["task_plan"].strip():
     st.divider()
     st.subheader("📋 Your Implementation Plan")
 
-    st.success(
-        "The design has been approved and the AI has prepared "
-        "the implementation plan."
-    )
+    if st.session_state["workflow_completed"]:
+        st.success(
+            "The design has been approved and the AI has prepared "
+            "the implementation plan."
+        )
+    else:
+        st.info(
+            "The implementation plan is ready. A later workflow step "
+            "did not finish; see the workflow error above."
+        )
 
     st.markdown(st.session_state["task_plan"])
 

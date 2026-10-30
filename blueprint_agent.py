@@ -6,10 +6,42 @@ from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
 from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field, model_validator, field_validator
+import os
+
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
 
+
+# blueprint_llm= ChatGroq(
+#     model="openai/gpt-oss-120b",
+#     temperature=0,
+# #     max_tokens=8192,
+# # )
+
+# blueprint_llm= ChatOllama(
+#     model="qwen2.5-coder:3b",
+#     temperature=0,
+#     num_predict=4096,
+# )
+
+# blueprint_llm =  ChatOpenAI(
+#     model=os.getenv("UNSLOTH_MODEL"),
+#     base_url=os.getenv("OPENAI_BASE_URL"),
+#     api_key=os.getenv("OPENAI_API_KEY"),
+#     temperature=0,
+#     max_tokens=4096,
+# )
+
+blueprint_llm = ChatOpenAI(
+    model=os.getenv("MODEL_NAME"),
+    base_url=os.getenv("OPENAI_API_BASE"),
+    api_key=os.getenv("OPENAI_API_TOKEN"),
+    temperature=0,
+    max_tokens=8192,
+)
 # --------------------------------------------------
 # 1. Blueprint schema
 # --------------------------------------------------
@@ -279,42 +311,32 @@ class ProjectBlueprint(BaseModel):
 
         return self
 
+
     @field_validator("project_name", mode="before")
     @classmethod
     def normalize_project_name(cls, value: str) -> str:
         if not isinstance(value, str):
             raise ValueError("Project name must be a string.")
 
-        # Convert a human-readable name into a directory-safe slug.
         value = value.strip().lower()
-        value = re.sub(r"\s+", "-", value)
-        value = re.sub(r"[^a-z0-9._-]+", "-", value)
-        value = re.sub(r"-+", "-", value)
-        value = value.strip("-.")
 
-        if not value or value in {".", ".."}:
-            raise ValueError("Invalid project name.")
+        # Replace spaces and punctuation with hyphens.
+        value = re.sub(r"[^a-z0-9]+", "-", value)
+        value = value.strip("-")
 
-        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", value):
-            raise ValueError(f"Invalid project name: {value!r}")
+        if not value:
+            raise ValueError("Project name cannot be empty.")
+
+        if len(value) > 80:
+            value = value[:80].rstrip("-")
+
+        # Must start and end with a letter or digit.
+        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value):
+            raise ValueError(
+                f"Invalid project name slug: {value!r}"
+            )
 
         return value
-
-# --------------------------------------------------
-# 2. LLM configuration
-# --------------------------------------------------
-
-blueprint_llm = ChatOllama(
-    model="llama3.2",
-    temperature=0,
-)
-
-groq_llm = ChatGroq(
-    model="openai/gpt-oss-120b",
-    temperature=0,
-)
-
-
 
 
 def extract_task_ids_and_dependencies(
@@ -475,6 +497,11 @@ def parse_canonical_tasks(task_plan: str) -> list[dict]:
         criteria = read_bullets(
             read_section(block, "Acceptance criteria")
         )
+        if not criteria:
+            criteria_text = read_field(block, "Acceptance criteria")
+
+            if criteria_text:
+                criteria = [criteria_text]
 
         if not objective:
             raise ValueError(
@@ -565,15 +592,17 @@ def normalize_blueprint_task_dependencies(
 
         llm_tasks_by_id[task_id] = task
 
-    # Reject task IDs that do not exist in the Task Planner output.
-    canonical_ids = {task["task_id"] for task in canonical_tasks}
-    unexpected_ids = set(llm_tasks_by_id) - canonical_ids
+        # Task Planner IDs are authoritative.
+        # Unknown Blueprint-generated tasks are ignored because final_tasks
+        # is reconstructed exclusively from canonical_tasks below.
+        canonical_ids = {task["task_id"] for task in canonical_tasks}
+        unexpected_ids = set(llm_tasks_by_id) - canonical_ids
 
-    if unexpected_ids:
-        raise ValueError(
-            "Blueprint LLM returned task IDs not present in the Task Planner: "
-            f"{sorted(unexpected_ids)}"
-        )
+        if unexpected_ids:
+            print(
+                "[Blueprint Warning] Ignoring unknown LLM-generated task IDs:",
+                sorted(unexpected_ids),
+            )
 
     # Normalize and index the generated file inventory.
     files_by_path = {}
@@ -763,8 +792,17 @@ BLUEPRINT RULES:
    the requirements and approved design. Keep names and contracts
    consistent throughout the blueprint.
 
-9. List environment variable names only. Never include secret values,
-   passwords, tokens or API keys.
+
+9. Environment configuration and security rules:
+   - List environment variable names only in environment_variables.
+   - Never include secret values, passwords, tokens or API keys.
+   - Never include a file named `.env`, `.env.local`,
+     `.env.production`, or any other real environment-secret file
+     in the files inventory.
+   - If environment configuration is needed, include `.env.example`
+     with placeholder values only.
+   - Do not put actual credentials in `.env.example`.
+
 
 10. Include install, run and test commands only when they can be
     reasonably determined from the approved stack.
@@ -882,6 +920,36 @@ Rules:
 - Keep the name consistent throughout the blueprint.
 
 The project name must be specific to the current request.
+
+CRITICAL TASK ID RULES:
+1. The Task Planner output is the sole source of truth for task IDs.
+2. Use only task IDs explicitly present in the supplied Task Planner output.
+3. Never invent, extend, renumber, or generate new task IDs.
+4. Do not create additional tasks to represent files or implementation details.
+5. Map each file to one or more existing Task Planner task IDs.
+6. If a file cannot be mapped to an existing task, report the issue
+   instead of creating a new task ID.
+7. Preserve every canonical task ID exactly as supplied.
+
+CANONICAL TASK CONSTRAINT — STRICT
+
+The TASK PLANNER OUTPUT above is the sole source of truth for tasks.
+
+1. Use only task IDs explicitly present in the TASK PLANNER OUTPUT.
+2. Preserve every task ID exactly as provided.
+3. Preserve each task's title, objective, dependencies, and acceptance criteria.
+4. Never invent, rename, extend, split, or remove task IDs.
+5. Map files only to existing Task Planner tasks.
+6. Do not create additional tasks to represent files or implementation details.
+7. If a task cannot be mapped, report the issue without inventing an ID.
+
+Rules:
+1. Never invent a task ID.
+2. Never create additional tasks or split existing tasks into new IDs.
+3. For each task, use its exact ID from the Task Planner output.
+4. Map generated files only to existing canonical task IDs.
+5. Do not return tasks with IDs that are absent from the Task Planner.
+6. If a task cannot be mapped, report the issue without inventing an ID.
 """
 
     
@@ -901,6 +969,8 @@ The project name must be specific to the current request.
         ProjectBlueprint.model_json_schema(),
         method="json_schema",
     )
+    print("BLUEPRINT PROMPT CHARACTERS:", len(prompt))
+    print("BLUEPRINT TASK PLAN CHARACTERS:", len(task_plan))
 
     blueprint_data = structured_llm.invoke(prompt)
 

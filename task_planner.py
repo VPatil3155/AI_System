@@ -1,10 +1,15 @@
 from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
 from langchain_groq import ChatGroq
+import os
+
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+
+load_dotenv()
 
 import re
 
-load_dotenv()
 
 
 # --------------------------------------------------
@@ -16,23 +21,49 @@ load_dotenv()
 #     temperature=0,
 # )
 
-planner_llm = ChatOllama(
-    model="llama3.2",
+# planner_llm = ChatOllama(
+#     model="llama3.2",
+#     temperature=0,
+#     num_predict=4096,
+# )
+
+# planner_llm = ChatGroq(
+#     model="openai/gpt-oss-120b",
+#     temperature=0,
+# )
+
+planner_llm = ChatGroq(
+    model="openai/gpt-oss-120b",
     temperature=0,
-    num_predict=4096,
+    max_tokens=4092,
 )
 
-# planner_llm = ChatGroq(
-#     model="openai/gpt-oss-120b",
+# planner_llm_r = ChatOllama(
+#     model="qwen2.5-coder:3b",
+#     temperature=0,
+#     num_predict=4096,
+# )
+
+# planner_llm = ChatOllama(
+#     model="hf.co/unsloth/Qwen3.5-4B-GGUF:UD-Q4_K_XL",
 #     temperature=0,
 # )
 
-# planner_llm = ChatGroq(
-#     model="openai/gpt-oss-120b",
+# planner_llm = ChatOpenAI(
+#     model=os.getenv("UNSLOTH_MODEL"),
+#     base_url=os.getenv("OPENAI_BASE_URL"),
+#     api_key=os.getenv("OPENAI_API_KEY"),
 #     temperature=0,
-#     max_tokens=8192,
+#     max_tokens=4096,
 # )
 
+# planner_llm = ChatOpenAI(
+#     model=os.getenv("MODEL_NAME"),
+#     base_url=os.getenv("OPENAI_API_BASE"),
+#     api_key=os.getenv("OPENAI_API_TOKEN"),
+#     temperature=0,
+#    max_tokens=8192,
+# )
 # --------------------------------------------------
 # Task Planner
 # --------------------------------------------------
@@ -43,7 +74,6 @@ planner_llm = ChatOllama(
 #         re.MULTILINE,
 #     )
 #     return bool(pattern.search(task_plan))
-
 
 def create_task_plan(
     user_request: str,
@@ -57,7 +87,11 @@ def create_task_plan(
     agents. It is not a human project schedule and contains no implementation
     code.
     """
-
+    print("\n===== TASK PLANNER INPUT CHECK =====")
+    print("USER REQUEST:", str(user_request)[:1500])
+    print("REQUIREMENTS:", str(requirements)[:2000])
+    print("APPROVED DESIGN:", str(design)[:3000])
+    print("===== END INPUT CHECK =====\n")
 
     prompt = f"""
     You are the Task Planning Agent in an AI-driven software development system.
@@ -134,6 +168,17 @@ Before returning, verify that at least one valid individual task heading
 exists and that every task has its required fields.
 
 Return the implementation plan only.
+
+HEADING NORMALIZATION RULES:
+
+- Canonical task headings are preferred.
+- Cosmetic heading variations may be normalized only when task identity
+  is established by the explicit task ID, task fields, and section context.
+- A section heading such as "## Database Tasks" is not an individual task.
+- Never silently change a Task ID to match a conflicting heading ID.
+- Preserve all eight top-level sections in the required order.
+- Every task must retain its identity and dependency relationships.
+
 ==================================================
 2. PRIMARY OBJECTIVE
 ==================================================
@@ -162,81 +207,81 @@ Do not copy example tasks about users, orders, products, or other business domai
 
 If an input does not specify a detail, use "Not specified" or record a clearly labeled, minimal assumption. Do not pretend an assumption was explicitly approved.
 
-==================================================
-3. ANALYZE THE PROJECT BEFORE DECOMPOSING IT
-==================================================
+# ==================================================
+# 3. ANALYZE THE PROJECT BEFORE DECOMPOSING IT
+# ==================================================
 
-Before constructing tasks, derive an internal project specification containing:
+# Before constructing tasks, derive an internal project specification containing:
 
-A. Product purpose
-- Intended users and primary problem, when specified.
-- Core workflows and expected outcomes.
-- Explicitly requested features.
-- Explicitly excluded features or constraints.
+# A. Product purpose
+# - Intended users and primary problem, when specified.
+# - Core workflows and expected outcomes.
+# - Explicitly requested features.
+# - Explicitly excluded features or constraints.
 
-B. Functional requirements
-- User actions and system responses.
-- Main success paths.
-- Relevant validation and error cases.
-- Authentication and authorization requirements, if applicable.
-- Data lifecycle operations, if applicable.
-- Search, filtering, reporting, or external integration requirements, if applicable.
+# B. Functional requirements
+# - User actions and system responses.
+# - Main success paths.
+# - Relevant validation and error cases.
+# - Authentication and authorization requirements, if applicable.
+# - Data lifecycle operations, if applicable.
+# - Search, filtering, reporting, or external integration requirements, if applicable.
 
-C. Technical architecture
-- Approved frontend technology.
-- Approved backend technology.
-- Approved database technology.
-- Approved testing tools.
-- Relevant architectural boundaries and interfaces.
-- Required configuration and environment variables.
-- External services explicitly required by the inputs.
+# C. Technical architecture
+# - Approved frontend technology.
+# - Approved backend technology.
+# - Approved database technology.
+# - Approved testing tools.
+# - Relevant architectural boundaries and interfaces.
+# - Required configuration and environment variables.
+# - External services explicitly required by the inputs.
 
-D. Data and interfaces
-- Entities, fields, relationships, and constraints supported by the inputs.
-- API endpoints, methods, request contracts, and response contracts supported by the design.
-- Frontend pages and components.
-- Internal interfaces between components.
-- Security and data-isolation boundaries.
+# D. Data and interfaces
+# - Entities, fields, relationships, and constraints supported by the inputs.
+# - API endpoints, methods, request contracts, and response contracts supported by the design.
+# - Frontend pages and components.
+# - Internal interfaces between components.
+# - Security and data-isolation boundaries.
 
-E. Verification requirements
-- Unit tests.
-- API or component tests.
-- Integration tests.
-- Authorization and validation tests.
-- Build, configuration, or startup verification.
+# E. Verification requirements
+# - Unit tests.
+# - API or component tests.
+# - Integration tests.
+# - Authorization and validation tests.
+# - Build, configuration, or startup verification.
 
-Include only categories that make sense for this project.
+# Include only categories that make sense for this project.
 
-Do not invent features to make the project appear more complete. For example, do not add payments, email delivery, cloud deployment, administrative roles, or external integrations unless they are requested, approved, or clearly necessary and explicitly labeled as assumptions.
+# Do not invent features to make the project appear more complete. For example, do not add payments, email delivery, cloud deployment, administrative roles, or external integrations unless they are requested, approved, or clearly necessary and explicitly labeled as assumptions.
 
-==================================================
-4. TASK DECOMPOSITION PRINCIPLES
-==================================================
+# ==================================================
+# 4. TASK DECOMPOSITION PRINCIPLES
+# ==================================================
 
-Decompose the project into meaningful, independently actionable tasks.
+# Decompose the project into meaningful, independently actionable tasks.
 
-Prefer 6–10 tasks for a small application when that provides adequate coverage. This is a guideline, not a hard limit. A project with substantial requirements may need more tasks; a very small project may need fewer.
+# Prefer 6–10 tasks for a small application when that provides adequate coverage. This is a guideline, not a hard limit. A project with substantial requirements may need more tasks; a very small project may need fewer.
 
-A task should:
-- Have one primary objective.
-- Produce an identifiable implementation result.
-- Have a bounded scope.
-- Specify concrete repository-relative file paths.
-- Define genuine prerequisite tasks.
-- Include objective acceptance criteria.
-- Be understandable to a worker without requiring the worker to redesign the entire application.
+# A task should:
+# - Have one primary objective.
+# - Produce an identifiable implementation result.
+# - Have a bounded scope.
+# - Specify concrete repository-relative file paths.
+# - Define genuine prerequisite tasks.
+# - Include objective acceptance criteria.
+# - Be understandable to a worker without requiring the worker to redesign the entire application.
 
-Split a task when it combines unrelated responsibilities, spans too many architectural layers, or cannot be independently verified.
+# Split a task when it combines unrelated responsibilities, spans too many architectural layers, or cannot be independently verified.
 
-Combine tasks when splitting them would create artificial dependencies or negligible work items.
+# Combine tasks when splitting them would create artificial dependencies or negligible work items.
 
-Avoid both extremes:
-- One oversized task that implements the entire application.
-- Numerous trivial tasks that only rename files, create empty folders, or repeat the same responsibility.
+# Avoid both extremes:
+# - One oversized task that implements the entire application.
+# - Numerous trivial tasks that only rename files, create empty folders, or repeat the same responsibility.
 
-Distinguish setup, implementation, and verification work. Do not treat the creation of a directory tree as proof that a feature has been implemented.
+# Distinguish setup, implementation, and verification work. Do not treat the creation of a directory tree as proof that a feature has been implemented.
 
-Every required feature must be covered by at least one task or be explicitly identified as unresolved. Do not silently omit functionality to meet a preferred task count.
+# Every required feature must be covered by at least one task or be explicitly identified as unresolved. Do not silently omit functionality to meet a preferred task count.
 
 ==================================================
 5. WORKER OWNERSHIP AND RESPONSIBILITIES
@@ -623,6 +668,19 @@ OUTPUT VALIDITY
 - No implementation code is included.
 - The response contains the completed plan only.
 
+
+For every task, format Acceptance criteria as a separate field
+followed by one or more bullet items on separate lines.
+
+Correct:
+- **Acceptance criteria:**
+  - The model compiles without errors.
+  - Duplicate usernames are rejected.
+
+Incorrect:
+- **Acceptance criteria:** The model compiles without errors.
+
+
 If an input does not provide enough information to make a safe decision, record the uncertainty explicitly. Do not fabricate details merely to pass validation.
 
 Return the complete project-specific implementation plan in Markdown.
@@ -646,15 +704,136 @@ Return the complete project-specific implementation plan in Markdown.
             return "\n".join(parts).strip()
 
         return str(content).strip()
+# *************************
+
+    TASK_ID_RE = re.compile(
+        r"\b(DB|BE|FE|INT)-(\d{1,3})\b",
+        re.IGNORECASE,
+    )
+
+    SECTION_CATEGORIES = {
+        "3. database tasks": "DB",
+        "4. backend tasks": "BE",
+        "5. frontend tasks": "FE",
+        "6. integration and testing tasks": "INT",
+    }
+
+    def canonical_id(value: str) -> str:
+        match = re.fullmatch(
+            r"(DB|BE|FE|INT)-(\d{1,3})",
+            value.strip(),
+            re.IGNORECASE,
+        )
+        if not match:
+            return value.strip().upper()
+        return f"{match.group(1).upper()}-{int(match.group(2)):03d}"
+
+    def normalize_task_headings(plan: str) -> str:
+        lines = plan.splitlines()
+        output = []
+        category = None
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            section_text = re.sub(r"^#+\s*", "", stripped).casefold()
+
+            if section_text in SECTION_CATEGORIES:
+                category = SECTION_CATEGORIES[section_text]
+                output.append(line)
+                i += 1
+                continue
+
+            if re.match(r"^#{1,2}\s+", stripped):
+                category = None
+                output.append(line)
+                i += 1
+                continue
+
+            heading_match = re.match(
+                r"^\s*#{3,6}\s+(.+?)\s*$", line
+            )
+            bold_match = re.match(
+                r"^\s*\*\*(.+?)\*\*\s*$", line
+            )
+
+            title_text = (
+                heading_match.group(1).strip()
+                if heading_match
+                else bold_match.group(1).strip()
+                if bold_match
+                else None
+            )
+
+            if title_text:
+                j = i + 1
+                while j < len(lines):
+                    candidate = lines[j].strip()
+                    if re.match(r"^#{1,6}\s+", candidate):
+                        break
+                    if re.match(r"^\*\*.+\*\*\s*$", candidate):
+                        break
+                    j += 1
+
+                block = "\n".join(lines[i + 1:j])
+
+                id_match = re.match(
+                    r"^(DB|BE|FE|INT)-(\d{1,3})"
+                    r"\s*[:—–-]\s*(.+)$",
+                    title_text,
+                    re.IGNORECASE,
+                )
+                task_match = re.match(
+                    r"^Task\s+(\d+)\s*[—–:-]\s*(.+)$",
+                    title_text,
+                    re.IGNORECASE,
+                )
+                field_match = re.search(
+                    r"(?im)^\s*[-*+]\s*"
+                    r"(?:\*\*)?Task ID(?:\*\*)?\s*:\s*"
+                    r"(DB|BE|FE|INT)-(\d{1,3})\b",
+                    block,
+                )
+
+                if id_match:
+                    task_id = canonical_id(
+                        f"{id_match.group(1)}-{id_match.group(2)}"
+                    )
+                    title = id_match.group(3).strip()
+                elif field_match:
+                    task_id = canonical_id(
+                        f"{field_match.group(1)}-{field_match.group(2)}"
+                    )
+                    title = title_text
+                elif task_match and category:
+                    task_id = canonical_id(
+                        f"{category}-{task_match.group(1)}"
+                    )
+                    title = task_match.group(2).strip()
+                else:
+                    output.append(line)
+                    i += 1
+                    continue
+
+                output.append(f"### {task_id}: {title}")
+                i += 1
+                continue
+
+            output.append(line)
+            i += 1
+
+        return "\n".join(output)
 
     task_heading_pattern = re.compile(
-        r"^###\s+((?:DB|BE|FE|INT)-\d{3}):\s*(.+\S)\s*$",
+        r"^###\s+((?:DB|BE|FE|INT)-\d{3}):\s+(.+\S)\s*$",
         re.MULTILINE | re.IGNORECASE,
     )
 
     def has_valid_task_headings(plan: str) -> bool:
-        """Check for parser-compatible implementation task headings."""
-        return bool(task_heading_pattern.search(plan))
+        normalized = normalize_task_headings(plan)
+        return bool(task_heading_pattern.search(normalized))
+
 
 
     def find_template_placeholders(plan: str) -> list[str]:
@@ -780,14 +959,32 @@ Return the complete project-specific implementation plan in Markdown.
                 + section_end_pattern
             )
             files_match = files_pattern.search(block)
-            file_paths = (
-                re.findall(
-                    r"(?m)^\s*[-*+]\s+`?([^`\s]+)`?\s*$",
-                    files_match.group(1),
+            file_paths = []
+
+            if files_match:
+                files_content = files_match.group(1)
+
+                # Extract paths from inline code, including inline field values.
+                file_paths.extend(
+                    re.findall(r"`([^`]+)`", files_content)
                 )
-                if files_match
-                else []
-            )
+
+                # Extract unquoted paths from individual bullet lines.
+                file_paths.extend(
+                    re.findall(
+                        r"(?m)^\s*[-*+]\s+([^\s`]+)\s*$",
+                        files_content,
+                    )
+                )
+
+                # Remove duplicates and ignore empty values.
+                file_paths = list(
+                    dict.fromkeys(
+                        path.strip()
+                        for path in file_paths
+                        if path.strip()
+                    )
+                )
             def is_repository_relative_file(file_path: str) -> bool:
                 normalized_path = file_path.replace("\\", "/")
                 parts = normalized_path.split("/")
@@ -815,17 +1012,24 @@ Return the complete project-specific implementation plan in Markdown.
                 )
                 return False
 
-            criteria_bullets = re.findall(
-                r"(?m)^\s*[-*+]\s+(.+?)\s*$",
-                criteria_match.group(1),
-            )
+        criteria_content = criteria_match.group(1).strip()
 
-            if not criteria_bullets:
-                print(
-                    f"Incomplete task {task_id}: "
-                    "Acceptance criteria contains no bullets."
-                )
-                return False
+        criteria_bullets = re.findall(
+            r"(?m)^\s*[-*+]\s+(.+?)\s*$",
+            criteria_content,
+        )
+
+        # Accept inline acceptance criteria as well as bullet lists.
+        # Example: "- **Acceptance criteria:** The model compiles."
+        if not criteria_bullets and criteria_content:
+            criteria_bullets = [criteria_content]
+
+        if not criteria_bullets:
+            print(
+                f"Incomplete task {task_id}: "
+                "Acceptance criteria contains no content."
+            )
+            return False
 
         return True
 
@@ -842,6 +1046,10 @@ Return the complete project-specific implementation plan in Markdown.
     
     response = planner_llm.invoke(prompt)
     task_plan = extract_text(response)
+    task_plan = normalize_task_headings(task_plan)
+    print("\n===== ORIGINAL TASK PLAN =====\n")
+    print(task_plan[:5000])
+    print("\n===== END ORIGINAL TASK PLAN =====\n")
     if not task_plan:
         raise ValueError("Task Planner returned an empty implementation plan.")
 
@@ -865,6 +1073,39 @@ APPROVED TECHNICAL DESIGN:
 
 PREVIOUS PLAN THAT FAILED VALIDATION:
 {task_plan}
+
+CRITICAL REPAIR RULES:
+
+1. Treat the ORIGINAL USER REQUEST, ANALYZED REQUIREMENTS,
+   and APPROVED TECHNICAL DESIGN as the source of truth.
+
+2. Do not preserve incorrect project details from the previous plan.
+   The previous plan is untrusted because it failed validation.
+
+3. Before writing tasks, identify the actual product, its required
+   features, and the approved technology stack from the source inputs.
+
+4. Do not replace the actual project with a generic user-profile,
+   CRUD, or authentication application unless that is the actual
+   requested project.
+
+5. Every task heading must have its own Task ID field.
+   Example:
+   ### DB-001: Define the expense data model
+   - Task ID: DB-001
+
+6. Use the exact field labels required by the output contract.
+   Do not substitute "File Paths" for "Files to create or modify".
+
+7. Use only DB, BE, FE, and INT task prefixes.
+   Testing tasks must use INT IDs.
+
+8. Use the exact required section heading:
+   ## 6. Integration and Testing Tasks
+
+9. Before returning the plan, compare the summary and every task
+   against the original inputs. Correct any project or technology
+   mismatch before returning the result.
 
 Your task is to rewrite the COMPLETE implementation plan for this exact project.
 Do not merely explain the errors. Do not return a template or a list of suggested fixes.
@@ -923,10 +1164,29 @@ Complete valid task block:
 
 Project-specific details must come from the original request, requirements, and approved design above.
 Generate concrete tasks for the actual project, not generic tasks such as "implement backend API".
+DEPENDENCY FIELD CORRECTION:
+
+Inspect every task in the implementation plan.
+
+Every task must contain exactly one dependency field:
+
+- Dependencies (task IDs): None
+
+OR
+
+- Dependencies (task IDs): DB-001, BE-001
+
+Do not omit this field, even if the task has no dependencies.
+
+Do not change existing task IDs.
+Do not invent new task IDs.
+Preserve all existing implementation details.
+Return the complete corrected implementation plan.
 """
 
         repair_response = planner_llm.invoke(repair_prompt)
         task_plan = extract_text(repair_response)
+        task_plan = normalize_task_headings(task_plan)
 
     # Final gate: malformed output must never be sent to the Blueprint Generator.
     if not task_plan:
@@ -949,12 +1209,14 @@ Generate concrete tasks for the actual project, not generic tasks such as "imple
             f"after the repair attempt: {found_placeholders}. "
             "The invalid plan was blocked before Blueprint generation."
         )
-
     if not has_complete_task_blocks(task_plan):
+        # print("\n===== INVALID TASK PLAN =====\n")
+        # print(task_plan)
+        # print("\n===== END INVALID TASK PLAN =====\n")
+
         raise ValueError(
-            "Task Planner returned an incomplete or invalid plan after "
-            "the repair attempt. The plan was blocked before Blueprint "
-            "generation."
+            "Task Planner validation failed. "
+            "See the validation messages and plan printed above."
         )
 
     return task_plan

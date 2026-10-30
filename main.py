@@ -2,6 +2,7 @@
 from langchain_ollama import ChatOllama
 
 from typing import Annotated,  TypedDict
+import os
 
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -9,6 +10,8 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Send
 from langgraph.checkpoint.memory import MemorySaver
 import operator
+from langchain_openai import ChatOpenAI
+
 
 from task_planner import create_task_plan
 from blueprint_agent import (
@@ -60,16 +63,24 @@ class ProjectState(TypedDict):
 # Use one cloud model for consistent latency.
 # Ensure GOOGLE_API_KEY is configured in your .env file.
 
-llm = ChatGoogleGenerativeAI(
-    model="gemini-3.8-flash",
-    temperature=0,
-    max_output_tokens=1800,
-)
+# llm = ChatGoogleGenerativeAI(
+#     model="gemini-3.8-flash",
+#     temperature=0,
+#     max_output_tokens=1800,
+# )
 
 local_llm = ChatOllama(
     model="llama3.2",
     temperature=0,
 )
+
+# local_llm = ChatOpenAI(
+#     model=os.getenv("MODEL_NAME"),
+#     base_url=os.getenv("OPENAI_API_BASE"),
+#     api_key=os.getenv("OPENAI_API_TOKEN"),
+#     temperature=0,
+#     max_tokens=4096,
+# )
 
 # --------------------------------------------------
 # 3. Helpers and routing
@@ -159,6 +170,16 @@ def design_agent(state: ProjectState) -> dict:
 You are a pragmatic software architect. Revise the existing design using
 the review findings and human feedback. Keep correct decisions, address
 important issues, and do not add unrelated features. Do not write code.
+
+When HUMAN FEEDBACK contains a TARGETED DESIGN REVISION:
+- Treat SELECTED DESIGN TEXT as the primary target of the user's comment.
+- Apply the requested change to that portion of the current design.
+- Update other sections only when required to keep the design technically consistent.
+- Preserve unrelated decisions, requirements, features, and wording wherever practical.
+- If the selected text appears more than once, use its surrounding context in the
+  PREVIOUS DESIGN to identify the intended occurrence.
+- Return the complete revised design using the required headings below; never return
+  only the selected excerpt.
 
 USER IDEA:
 {state["user_request"]}

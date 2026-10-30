@@ -29,8 +29,8 @@ for module_name, class_name in (
 import task_planner
 
 
-def make_task_block(fields: str) -> str:
-    return f"### DB-001: Define the task data model\n{fields}\n"
+def make_task_block(fields: str, task_id: str = "DB-001") -> str:
+    return f"### {task_id}: Define the task data model\n{fields}\n"
 
 
 class FakeResponse:
@@ -89,6 +89,26 @@ def test_valid_task_with_plain_field_labels(monkeypatch):
 - Dependencies (task IDs): None
 - Acceptance criteria:
   - The model contains the required fields."""
+    )
+
+    fake_planner = FakePlanner([task])
+    monkeypatch.setattr(task_planner, "planner_llm", fake_planner)
+    assert task_planner.create_task_plan("request", "requirements", "design") == task.strip()
+    assert fake_planner.calls == 1
+
+
+def test_fe_task_id_in_inline_code_matches_its_heading(monkeypatch):
+    task = make_task_block(
+        """- Task ID: `FE-009`
+- Worker type: frontend
+- Objective: Define the task interface.
+- Files to create or modify:
+  - frontend/src/task.py
+- Scope and implementation details: Define the task interface.
+- Dependencies (task IDs): None
+- Acceptance criteria:
+  - The interface is defined.""",
+        task_id="FE-009",
     )
 
     fake_planner = FakePlanner([task])
